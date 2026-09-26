@@ -429,13 +429,21 @@ function Register-TerminalShellProfile {
                         }
                     }
                 } elseif ($base -eq 'msys2_shell.cmd') {
+                    $matchesMsys=$false
                     if ($profile.guid -in $msysGuids) {
-                        # Only the executable changes; keep shell flags, names, icons and appearance.
+                        # Repair the executable and visibility; keep shell flags, names, icons and appearance.
                         $command='"'+$msysCommand+'"'+$arguments
                         if ($profile.commandline -cne $command) { $profile.commandline=$command; $changed=$true }
                         $found=$true
+                        $matchesMsys=$true
                     } elseif ([Environment]::ExpandEnvironmentVariables($exe).Replace('/','\') -eq $msysCommand) {
                         $found=$true
+                        $matchesMsys=$true
+                    }
+                    # Terminal setup may have hidden presets before the MSYS2 installation step.
+                    if ($matchesMsys -and $profile.PSObject.Properties['hidden'] -and $profile.hidden -eq $true) {
+                        $profile.hidden=$false
+                        $changed=$true
                     }
                 }
             }

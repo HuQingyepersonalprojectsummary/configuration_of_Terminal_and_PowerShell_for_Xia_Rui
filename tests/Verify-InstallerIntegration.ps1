@@ -55,6 +55,10 @@ try {
     $settings=[IO.File]::ReadAllText((Join-Path $projectRoot 'settings.json')) | ConvertFrom-Json
     $visualBefore=$settings.profiles.defaults | ConvertTo-Json -Depth 30 -Compress
     $settings.profiles.list=@($settings.profiles.list | Where-Object name -ne 'NuShell')
+    # Fresh installs hide these presets before MSYS2 is installed. Registration must reveal them later.
+    foreach ($profile in $settings.profiles.list) {
+        if ($profile.commandline -like '*msys2_shell.cmd*') { $profile.hidden=$true }
+    }
     $settings.profiles.list+= [pscustomobject]@{guid='{00000000-0000-0000-0000-000000000001}';name='GNU Bash';commandline='bash.exe';colorScheme='Campbell'}
     $settings.profiles.list+= [pscustomobject]@{guid='{00000000-0000-0000-0000-000000000002}';name='Other MSYS2';commandline='"E:\Other\msys2_shell.cmd" -mingw64';hidden=$true}
     Set-TerminalText $wt ($settings | ConvertTo-Json -Depth 100)
@@ -99,7 +103,9 @@ function Get-Command {
         $before=@($settings.profiles.list | Where-Object guid -eq $profile.guid)[0]
         if ($before.commandline -like 'C:\msys64\msys2_shell.cmd*') {
             Assert ($profile.commandline.StartsWith('"'+$expectedCommand+'" ')) 'Managed MSYS2 entry retained its old executable.'
+            Assert ($profile.hidden -eq $false) 'Installed MSYS2 entry is still hidden from the menu.'
             $profile.commandline=$before.commandline
+            $profile.hidden=$before.hidden
         }
     }
     Assert (($after.profiles.list | ConvertTo-Json -Depth 30 -Compress) -ceq $originalProfiles) 'Registration changed names, icons, shell flags or unrelated profiles.'
@@ -113,6 +119,17 @@ function Get-Command {
     $backup=[IO.File]::ReadAllText((Join-Path $repo '.last-install-backup'))
     $manifest=Get-Content -LiteralPath (Join-Path $backup 'manifest.json') -Raw -Encoding UTF8 | ConvertFrom-Json
     Assert (@($manifest.Files | Where-Object Target -eq $bashrc).Count -eq 1) 'Custom MSYS2 file was not backed up.'
+
+    # Also reveal an existing custom-GUID entry for this installation, but leave other roots hidden.
+    $sameRoot=[pscustomobject]@{guid='{00000000-0000-0000-0000-000000000003}';name='Custom MSYS2';commandline=('"'+$expectedCommand+'" -ucrt64');hidden=$true;opacity=67}
+    $otherRoot=[pscustomobject]@{guid='{00000000-0000-0000-0000-000000000004}';name='Other installation';commandline='"E:\Other\msys2_shell.cmd" -msys';hidden=$true}
+    Set-TerminalText $wt (@{profiles=@{list=@($sameRoot,$otherRoot)}} | ConvertTo-Json -Depth 10)
+    Register-TerminalShellProfile -Shell MSYS2 -Msys2InstallPath $custom
+    $visibility=Get-Content -LiteralPath $wt -Raw -Encoding UTF8 | ConvertFrom-Json
+    Assert ($visibility.profiles.list.Count -eq 2 -and $visibility.profiles.list[0].hidden -eq $false) 'Matching custom MSYS2 entry stayed hidden or was duplicated.'
+    Assert ($visibility.profiles.list[0].opacity -eq 67 -and $visibility.profiles.list[1].hidden -eq $true) 'Visibility repair changed appearance or another MSYS2 installation.'
+    # Restore the original fixture for the remaining NuShell integration checks.
+    Set-TerminalText $wt ($settings | ConvertTo-Json -Depth 100)
 
     & (Join-Path $repo 'Install-NuShell.ps1') -NonInteractive
     $after=Get-Content -LiteralPath $wt -Raw -Encoding UTF8 | ConvertFrom-Json
